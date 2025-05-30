@@ -1,26 +1,42 @@
 package com.ecom.mall.service.impl;
 
+import com.ecom.mall.common.exception.Asserts;
+import com.ecom.mall.common.util.RequestUtil;
 import com.ecom.mall.dto.UmsAdminParam;
+import com.ecom.mall.repository.UmsAdminLoginLogRepository;
 import com.ecom.mall.repository.UmsAdminRepository;
 import com.ecom.mall.security.util.JwtTokenUtil;
 import com.ecom.mall.security.util.SpringUtil;
 import com.ecom.mall.service.UmsAdminCacheService;
 import com.ecom.mall.service.UmsAdminService;
 import com.ecom.mall.user.UmsAdmin;
+import com.ecom.mall.user.UmsAdminLoginLog;
 import com.ecom.mall.user.UmsResource;
 import com.ecom.mall.user.UmsRole;
+import jakarta.servlet.http.HttpServletRequest;
+import org.apache.tomcat.util.http.fileupload.RequestContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 
 @Service
 public class UmsAdminServiceImpl implements UmsAdminService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(UmsAdminServiceImpl.class);
     @Autowired
     private JwtTokenUtil jwtTokenUtil;
     @Autowired
@@ -34,7 +50,7 @@ public class UmsAdminServiceImpl implements UmsAdminService {
     @Autowired
     private UmsAdminRoleRelationDao adminRoleRelationDao;
     @Autowired
-    private UmsAdminLoginLogMapper loginLogMapper;
+    private UmsAdminLoginLogRepository loginLogRepository;
 
     @Override
     public UmsAdmin getAdminByUsername(String username) {
@@ -55,30 +71,62 @@ public class UmsAdminServiceImpl implements UmsAdminService {
     public UmsAdmin register(UmsAdminParam umsAdminParam) {
         UmsAdmin umsAdmin = new UmsAdmin();
         BeanUtils.copyProperties(umsAdminParam, umsAdmin);
-        umsAdmin.setCreateTime(new Date());
+        umsAdmin.setCreateTime(Instant.now());
         umsAdmin.setStatus(1);
-        //查询是否有相同用户名的用户
-        UmsAdminExample example = new UmsAdminExample();
-        example.createCriteria().andUsernameEqualTo(umsAdmin.getUsername());
-        List<UmsAdmin> umsAdminList = adminMapper.selectByExample(example);
-        if (umsAdminList.size() > 0) {
+        //Kiểm tra xem có người dùng nào có cùng tên người dùng không
+        UmsAdmin userAdmin = adminRepository.findByUsername(umsAdmin.getUsername());
+        if (userAdmin != null) {
             return null;
         }
-        //将密码进行加密操作
+        //Mã hóa mật khẩu
         String encodePassword = passwordEncoder.encode(umsAdmin.getPassword());
         umsAdmin.setPassword(encodePassword);
-        adminMapper.insert(umsAdmin);
+        adminRepository.save(umsAdmin);
         return umsAdmin;
     }
 
     @Override
     public String login(String username, String password) {
-        return "";
+        String token = null;
+        //Mật khẩu cần được mã hóa bởi clients
+        try {
+            UserDetails userDetails = loadUserByUsername(username);
+            if (!passwordEncoder.matches(password, userDetails.getPassword())){
+                Asserts.fail("Mật khẩu không chính xác");
+            }
+            if (!userDetails.isEnabled()) {
+                Asserts.fail("Tài khoản đã bị vô hiệu hóa");
+            }
+
+           /* userDetails: Chứa thông tin người dùng đã được xác thực
+            null: Đại diện cho credentials (password, nhưng không cần thiết sau khi xác thực)
+            userDetails.getAuthorities(): Lấy danh sách quyền (roles) của người dùng */
+            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(userDetails,null, userDetails.getAuthorities());
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+            token = jwtTokenUtil.generateToken(userDetails);
+            insertLoginLog(username);
+        } catch (AuthenticationException e) {
+            LOGGER.warn("Lỗi đăng nhập:{}", e.getMessage());
+        }
+        return token;
+    }
+
+    /* Thêm bản ghi đăng nhập */
+    private void insertLoginLog(String username){
+        UmsAdmin admin = getAdminByUsername(username);
+        if (admin == null) return;
+        UmsAdminLoginLog loginLog = new UmsAdminLoginLog();
+        loginLog.setAdminId(admin.getId());
+        loginLog.setCreateTime(Instant.now());
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        HttpServletRequest request = attributes.getRequest();
+        loginLog.setIp(RequestUtil.getRequestIp(request));
+        loginLogRepository.save(loginLog);
     }
 
     @Override
     public String refreshToken(String oldToken) {
-        return "";
+        return jwtTokenUtil.refreshHeadToken(oldToken);
     }
 
     @Override

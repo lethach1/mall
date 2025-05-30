@@ -30,6 +30,10 @@ public class CommonResult<T> {
         return new CommonResult<T>(ResultCode.SUCCESS.getCode(), message, data);
     }
 
+    public static <T> CommonResult<T> failed(String message) {
+        return new CommonResult<T>(ResultCode.FAILED.getCode(), message, null);
+    }
+
     public static <T> CommonResult <T> failed (ErrorCode errorCode) {
         return new CommonResult<T>(errorCode.getCode(), errorCode.getMessage(), null);
     }

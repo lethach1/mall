@@ -4,6 +4,7 @@ import com.ecom.mall.common.service.RedisService;
 import com.ecom.mall.service.UmsAdminCacheService;
 import com.ecom.mall.service.UmsAdminService;
 import com.ecom.mall.user.UmsAdmin;
+import com.ecom.mall.user.UmsAdminRoleRelation;
 import com.ecom.mall.user.UmsResource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
